@@ -30,7 +30,7 @@ BOOKING_URL = f"{NEXTJS_BOOK_URL}/api/calendar/book"
 print(f"🔗 BOOKING: {BOOKING_URL}\n")
 
 OPENAI_URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17"
-OPENAI_VOICE = "verse"
+OPENAI_VOICE = "marin"
 
 # ============================================================
 # SYSTEM PROMPT
