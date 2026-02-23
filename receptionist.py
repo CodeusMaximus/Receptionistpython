@@ -33,6 +33,35 @@ OPENAI_URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-202
 OPENAI_VOICE = "verse"
 
 # ============================================================
+# SYSTEM PROMPT
+# ============================================================
+
+
+def build_system_prompt(business_name: str, services_text: str) -> str:
+    return f"""You are a warm, professional AI receptionist for {business_name}.
+
+Your job is to:
+1. Greet the caller warmly and ask if they've visited before
+2. If yes, ask for their phone number to look them up
+3. Once identified, help them book an appointment
+4. Collect: service, date, and time — one at a time, naturally
+5. Confirm the booking and let them know a confirmation email will be sent
+
+Services offered: {services_text if services_text else "various services"}
+
+Guidelines:
+- Be conversational and friendly, not robotic
+- Keep responses short — this is a phone call
+- If you don't understand something, politely ask them to repeat
+- Never make up information about the business
+- If they ask something you can't answer, offer to have someone call them back
+- Always confirm details before booking (service, date, time)
+- Use natural language for times like "3 in the afternoon" not "15:00"
+
+You are NOT a general assistant — stay focused on greeting callers and booking appointments."""
+
+
+# ============================================================
 # PARSING
 # ============================================================
 NUMBER_WORDS = {
@@ -41,6 +70,7 @@ NUMBER_WORDS = {
     "four": "4", "five": "5", "six": "6",
     "seven": "7", "eight": "8", "nine": "9",
 }
+
 
 def parse_phone(text: str) -> tuple[str | None, str | None]:
     t = text.lower()
@@ -53,11 +83,14 @@ def parse_phone(text: str) -> tuple[str | None, str | None]:
         return f"+{digits}", digits[1:]
     return None, None
 
+
 def parse_time_from_text(text: str) -> str | None:
     try:
         text_lower = text.lower()
-        time_indicators = ['am', 'a.m.', 'pm', 'p.m.', 'oclock', 'o\'clock', 'noon', 'midnight']
-        has_time = any(ind in text_lower for ind in time_indicators) or re.search(r'\d+:\d+', text_lower)
+        time_indicators = ['am', 'a.m.', 'pm', 'p.m.',
+                           'oclock', 'o\'clock', 'noon', 'midnight']
+        has_time = any(ind in text_lower for ind in time_indicators) or re.search(
+            r'\d+:\d+', text_lower)
         if not has_time:
             return None
         if "noon" in text_lower:
@@ -66,7 +99,8 @@ def parse_time_from_text(text: str) -> str | None:
             return "00:00"
         for word, digit in NUMBER_WORDS.items():
             text_lower = re.sub(rf"\b{word}\b", digit, text_lower)
-        parsed = dateparser.parse(text_lower, settings={'TIMEZONE': 'America/New_York'})
+        parsed = dateparser.parse(text_lower, settings={
+                                  'TIMEZONE': 'America/New_York'})
         if parsed:
             result = parsed.strftime('%H:%M')
             print(f"  ✅ Time: '{text}' → {result}")
@@ -74,6 +108,7 @@ def parse_time_from_text(text: str) -> str | None:
         return None
     except:
         return None
+
 
 def parse_date_from_text(text: str, existing_date: str | None = None) -> str | None:
     try:
@@ -107,6 +142,7 @@ def parse_date_from_text(text: str, existing_date: str | None = None) -> str | N
     except:
         return None
 
+
 def extract_service(text: str, services: list) -> str | None:
     text_lower = text.lower()
     for service in services:
@@ -118,6 +154,8 @@ def extract_service(text: str, services: list) -> str | None:
 # ============================================================
 # HELPERS
 # ============================================================
+
+
 async def http_post(url, payload, timeout=10):
     headers = {"Content-Type": "application/json"}
     if INTERNAL_API_KEY:
@@ -129,11 +167,13 @@ async def http_post(url, payload, timeout=10):
     print(f"✅ {response.status_code}")
     return response
 
+
 async def ai_say(ws, text):
     await ws.send(json.dumps({
         "type": "response.create",
-        "response": {"modalities": ["audio"], "instructions": f"Say: {text}"}
+        "response": {"modalities": ["audio"], "instructions": f"Say exactly: {text}"}
     }))
+
 
 async def book_appointment(business_id, business_name, customer_info, details):
     start = datetime.fromisoformat(f"{details['date']}T{details['time']}:00")
@@ -153,18 +193,21 @@ async def book_appointment(business_id, business_name, customer_info, details):
     response = await http_post(BOOKING_URL, payload)
     return response.json()
 
+
 async def update_ai_with_customer(ws, customer, business_name, services_text):
     first = customer['name'].split()[0]
     await ws.send(json.dumps({
         "type": "session.update",
         "session": {
-            "instructions": f"You're a receptionist for {business_name}. Customer: {first}. Services: {services_text}. Answer questions naturally."
+            "instructions": build_system_prompt(business_name, services_text) + f"\n\nYou are currently speaking with {first}. They are an existing customer."
         }
     }))
 
 # ============================================================
 # MAIN LOOP
 # ============================================================
+
+
 async def openai_loop(openai_ws, twilio_ws, stream_sid, business_id, business_name, services, services_text):
     state = {
         "phone_norm": None,
@@ -193,7 +236,8 @@ async def openai_loop(openai_ws, twilio_ws, stream_sid, business_id, business_na
                 continue
 
             print(f"\n👤 {text}")
-            print(f"📊 service={state['service']}, date={state['date']}, time={state['time']}")
+            print(
+                f"📊 service={state['service']}, date={state['date']}, time={state['time']}")
 
             # 🔧 SLOT MERGE (DO NOT REMOVE)
             if state["booking"]:
@@ -219,21 +263,25 @@ async def openai_loop(openai_ws, twilio_ws, stream_sid, business_id, business_na
                         state["customer_info"] = lookup["customer"]
                         state["ready"] = True
                         await update_ai_with_customer(openai_ws, state["customer_info"], business_name, services_text)
-                        await ai_say(openai_ws, f"Hi {state['customer_info']['name'].split()[0]}! How can I help?")
+                        await ai_say(openai_ws, f"Hi {state['customer_info']['name'].split()[0]}! How can I help you today?")
+                    else:
+                        await ai_say(openai_ws, "I don't have that number on file. Can I get your name to create a profile?")
                     continue
 
-            if state["ready"] and not state["booking"] and any(x in text_lower for x in ["book", "schedule", "appointment"]):
+            if state["ready"] and not state["booking"] and any(x in text_lower for x in ["book", "schedule", "appointment", "reserve"]):
                 print("🎯 Booking mode")
                 state["booking"] = True
 
             if state["booking"]:
                 if not state["service"]:
-                    await ai_say(openai_ws, "What service?")
+                    await ai_say(openai_ws, f"What service would you like? We offer {services_text}.")
                 elif not state["date"]:
-                    await ai_say(openai_ws, "What date?")
+                    await ai_say(openai_ws, "What date works for you?")
                 elif not state["time"]:
-                    await ai_say(openai_ws, "What time?")
+                    await ai_say(openai_ws, "And what time?")
                 else:
+                    print(
+                        f"📅 Booking: {state['service']} on {state['date']} at {state['time']}")
                     result = await book_appointment(
                         business_id,
                         business_name,
@@ -241,21 +289,30 @@ async def openai_loop(openai_ws, twilio_ws, stream_sid, business_id, business_na
                         state
                     )
                     if result.get("success"):
-                        await ai_say(openai_ws, "You're all set! A confirmation email has been sent.")
-                        state.update({"booking": False, "service": None, "date": None, "time": None})
+                        await ai_say(openai_ws, f"You're all set! I've booked your {state['service']} for {state['date']} at {state['time']}. A confirmation email has been sent.")
+                        state.update(
+                            {"booking": False, "service": None, "date": None, "time": None})
                     else:
-                        await ai_say(openai_ws, "That time is unavailable. Another time?")
+                        await ai_say(openai_ws, "I'm sorry, that time isn't available. Would you like to try a different time?")
                         state["time"] = None
 
+
 async def handle_twilio_stream(ws):
+    openai_ws = None
     async for msg in ws:
         data = json.loads(msg)
         if data.get("event") == "start":
             business_id = data["start"]["customParameters"].get("businessId")
+            print(f"\n📞 Incoming call for businessId: {business_id}")
+
             cfg = (await http_post(CONFIG_URL, {"businessId": business_id})).json()
             business_name = cfg.get("businessName", "our business")
             services = [s['name'] for s in cfg.get("services", [])]
             services_text = ", ".join(services)
+
+            print(f"🏢 Business: {business_name}")
+            print(f"🛠️ Services: {services_text}")
+
             openai_ws = await websockets.connect(
                 OPENAI_URL,
                 additional_headers={
@@ -263,33 +320,54 @@ async def handle_twilio_stream(ws):
                     "OpenAI-Beta": "realtime=v1",
                 },
             )
+
             await openai_ws.send(json.dumps({
                 "type": "session.update",
                 "session": {
                     "modalities": ["audio", "text"],
                     "voice": OPENAI_VOICE,
-                    "instructions": f"You're a receptionist for {business_name}. Ask if they've been here before. If yes, get phone number.",
+                    "instructions": build_system_prompt(business_name, services_text),
                     "input_audio_format": "g711_ulaw",
                     "output_audio_format": "g711_ulaw",
                     "input_audio_transcription": {"model": "whisper-1"},
+                    "turn_detection": {
+                        "type": "server_vad",
+                        "threshold": 0.5,
+                        "prefix_padding_ms": 300,
+                        "silence_duration_ms": 600,
+                    },
                 },
             }))
+
             asyncio.create_task(
-                openai_loop(openai_ws, ws, data["start"]["streamSid"], business_id, business_name, services, services_text)
+                openai_loop(openai_ws, ws, data["start"]["streamSid"],
+                            business_id, business_name, services, services_text)
             )
-            await ai_say(openai_ws, f"Thank you for calling {business_name}. Have you been here before?")
+
+            await ai_say(openai_ws, f"Thank you for calling {business_name}! Have you visited us before?")
+
         elif data.get("event") == "media":
-            await openai_ws.send(json.dumps({
-                "type": "input_audio_buffer.append",
-                "audio": data["media"]["payload"],
-            }))
+            if openai_ws:
+                await openai_ws.send(json.dumps({
+                    "type": "input_audio_buffer.append",
+                    "audio": data["media"]["payload"],
+                }))
+
         elif data.get("event") == "stop":
             print("\n📞 Call ended\n")
+            if openai_ws:
+                await openai_ws.close()
             break
 
+# ============================================================
+# ENTRY POINT
+# ============================================================
+
+
 async def main():
-    print("🚀 AI RECEPTIONIST\n")
-    async with websockets.serve(handle_twilio_stream, "0.0.0.0", 5001):
+    port = int(os.environ.get("PORT", 5001))
+    print(f"🚀 AI RECEPTIONIST on port {port}\n")
+    async with websockets.serve(handle_twilio_stream, "0.0.0.0", port):
         await asyncio.Future()
 
 if __name__ == "__main__":
