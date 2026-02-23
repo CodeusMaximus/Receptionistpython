@@ -88,7 +88,7 @@ def parse_time_from_text(text: str) -> str | None:
     try:
         text_lower = text.lower()
         time_indicators = ['am', 'a.m.', 'pm', 'p.m.',
-                           'oclock', 'o\'clock', 'noon', 'midnight']
+                           'oclock', "o'clock", 'noon', 'midnight']
         has_time = any(ind in text_lower for ind in time_indicators) or re.search(
             r'\d+:\d+', text_lower)
         if not has_time:
@@ -344,7 +344,16 @@ async def handle_twilio_stream(ws):
                             business_id, business_name, services, services_text)
             )
 
-            await ai_say(openai_ws, f"Thank you for calling {business_name}! Have you visited us before?")
+            # ✅ Trigger immediate greeting without waiting for caller to speak
+            await openai_ws.send(json.dumps({
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "The phone was just answered. Greet the caller now."}]
+                }
+            }))
+            await openai_ws.send(json.dumps({"type": "response.create"}))
 
         elif data.get("event") == "media":
             if openai_ws:
